@@ -1,0 +1,137 @@
+service: S3DataMigration1
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.8
+  region: eu-west-1
+  stage: ${opt:stage}
+  memorySize: 9049
+  timeout: 900
+  role: !GetAtt LambdaRole.Arn
+
+functions:
+  S3DataMigration:
+    name: S3DataMigration
+    handler: handler.lambda_handler
+    description: Migrate customer Bucket to S3 Bucket in a different account
+
+resources:
+  Resources:
+
+    LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: lambda_s3_data_migration_role_new
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        Policies:
+          - PolicyName: AssumeRole
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sts:AssumeRole
+                  Resource: arn:aws:iam:::role/S3Backup
+          - PolicyName: Inline_S3_BucketPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Sid: DestinationS3Access
+                  Effect: Allow
+                  Action:
+                    - s3:GetBucketLocation
+                    - s3:ListBucket
+                    - s3:ListBucketMultipartUploads
+                  Resource:
+                    - arn:aws:s3:::*
+                - Sid: DestinationS3AccessPaths
+                  Effect: Allow
+                  Action:
+                    - s3:AbortMultipartUpload
+                    - s3:DeleteObject
+                    - s3:GetObject
+                    - s3:listMultipartUploadParts
+                    - s3:PutObject
+                    - s3:GetObjectTagging
+                    - s3:PutObjectTagging
+                  Resource:
+                    - arn:aws:s3:::*/*    
+
+    S3SystemManagerDocument:
+      Type: AWS::SSM::Document
+      Properties:
+        Content:
+          schemaVersion: '0.3'
+          description: 'S3 Migration Document'
+          parameters:
+            DestinationBucketAccountID:
+              type: String
+              default: ${self:custom.env_accountid.${self:provider.stage}}
+            SourceBucket:
+              type: String
+            DestinationBucket:
+              type: String
+            region:
+              type: String
+              default: 'eu-west-1'
+            LambdaRole:
+              type: String
+              default: ${self:custom.lambda_roles.${self:provider.stage}}
+            s3prefix:
+              type: String
+          mainSteps:
+            - name: S3DataMigration
+              action: 'aws:invokeLambdaFunction'
+              timeoutSeconds: 9200
+              inputs: 
+                FunctionName: S3DataMigration
+                InvocationType: RequestResponse
+                Payload: |
+                  {
+                    "DestinationBucketAccountID": "{{DestinationBucketAccountID}}",
+                    "SourceBucket": "{{SourceBucket}}",
+                    "DestinationBucket": "{{DestinationBucket}}",
+                    "region": "{{region}}",
+                    "LambdaRole": "{{LambdaRole}}",
+                    "s3prefix": "{{s3prefix}}"
+                  }
+        DocumentType: Automation
+        Name: S3DataMigration
+
+    EventBridge:
+      Type: AWS::Events::Rule
+      Properties:
+        Description: 'EventBridge Rule for S3DataMigration'
+        EventPattern:
+          source:
+            - aws.lambda
+          detail-type:
+            - Lambda Function Timeout
+          detail:
+            status:
+              - TIMED_OUT
+custom:
+  env_resources:
+    uat: 
+    prod: 
+  lambda_roles:
+    uat: 
+    prod: 
+  env_accountid:
+    uat: 
+    prod: 
+
+
+    

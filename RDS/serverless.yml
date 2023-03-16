@@ -1,0 +1,144 @@
+service: RDSMigration
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: python3.8
+  region: eu-west-1
+  stage: ${opt:stage}
+  memorySize: 8049
+  timeout: 900
+  role: !GetAtt LambdaRole.Arn
+functions:
+  RDSDBMigration:
+    name: RDSDBMigration
+    handler: RDSBackup.lambda_handler
+    description: Migrate RDS data to Another RDS
+    RDSSnapShot:
+  RDSSnapShot:
+    name: RDSSnapShot
+    handler: lambda_function.lambda_handler
+    description: Create RDS SnapShot
+
+resources:
+  Resources:
+    LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: rds_migration_lambda_role_uat_new
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonSSMFullAccess
+          - arn:aws:iam::aws:policy/AmazonSSMAutomationApproverAccess
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/AmazonRDSFullAccess
+        Policies:
+          - PolicyName: AssumeRole
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sts:AssumeRole
+                  Resource: ${self:custom.env_resources.${opt:stage}}
+
+    RDSSystemManagerDocument:
+      Type: AWS::SSM::Document
+      Properties:
+        Content:
+          schemaVersion: '0.3'
+          description: 'RDS Migration Document for ${opt:stage}'
+          parameters:
+            SourceRDS:
+              type: String
+            TargetRDS:
+              type: String
+            SourceUser:
+              type: String
+            TargetUser:
+              type: String
+            Sourcepwd:
+              type: String
+            Targetpwd:
+              type: String
+            customer:
+              type: String
+            instanceid:
+              type: String
+              default: ${self:custom.env_instances.${opt:stage}}
+            databaseTable:
+              type: String
+          mainSteps:
+            - name: RDSMigration
+              action: 'aws:invokeLambdaFunction'
+              timeoutSeconds: 9200
+              inputs:
+                FunctionName: RDSDBMigration
+                InvocationType: RequestResponse
+                Payload: |
+                  {
+                    "SourceRDS": "{{SourceRDS}}",
+                    "TargetRDS": "{{TargetRDS}}",
+                    "SourceUser": "{{SourceUser}}",
+                    "TargetUser": "{{TargetUser}}",
+                    "Sourcepwd": "{{Sourcepwd}}",
+                    "Targetpwd": "{{Targetpwd}}",
+                    "customer": "{{customer}}",
+                    "instanceid": "{{instanceid}}",
+                    "databaseTable": "{{databaseTable}}"
+                  }
+        DocumentType: Automation
+        Name: RDSDBMigrate
+
+
+    RDSSnapshotSystemManagerDocument:
+      Type: AWS::SSM::Document
+      Properties:
+        Content:
+          schemaVersion: '0.3'
+          description: 'RDS Snapshot Document for ${opt:stage}'
+          parameters:
+            Region:
+              type: String
+            RDSInstance:
+              type: String
+            AWSSourceAccountID:
+              type: String
+            AWSDestinationAccountID:
+              type: String
+            subnetgroup:
+              type: String
+          mainSteps:
+            - name: RDSSnapShot
+              action: 'aws:invokeLambdaFunction'
+              timeoutSeconds: 9200
+              inputs:
+                FunctionName: RDSSnapShot
+                InvocationType: RequestResponse
+                Payload: |
+                  {
+                    "Region": "{{Region}}",
+                    "RDSInstance": "{{RDSInstance}}",
+                    "AWSSourceAccountID": "{{AWSSourceAccountID}}",
+                    "AWSDestinationAccountID": "{{AWSDestinationAccountID}}",
+                    "subnetgroup": "{{subnetgroup}}"
+                  }
+        DocumentType: Automation
+        Name: RDSSnapShot
+
+custom:
+  env_resources:
+    uat: 
+    prod: 
+  env_instances:
+    uat: 
+    prod: 
+

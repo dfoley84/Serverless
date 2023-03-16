@@ -1,0 +1,91 @@
+service: DynamoDBTableMigration
+frameworkVersion: '3'
+provider:
+  name: aws
+  runtime: python3.8
+  region: eu-west-1
+  stage: ${opt:stage}
+  memorySize: 8049
+  timeout: 900
+  role: !GetAtt LambdaRole.Arn
+functions:
+  DynamoDBMigration:
+    name: DynamoTableIndexMigration
+    handler: handler.lambda_handler
+    description: Migrate DynamoDB data to Another DynamoDB
+resources:
+  Resources:
+    LambdaRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: dynamodb_migration_lambda_new_role
+        AssumeRolePolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - lambda.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+          - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+        Policies:
+          - PolicyName: AssumeRole
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - sts:AssumeRole
+                  Resource: ${self:custom.env_resources.${self:provider.stage}}
+    DSSnapshotSystemManagerDocument:
+      Type: AWS::SSM::Document
+      Properties:
+        Content:
+          schemaVersion: '0.3'
+          description: 'RDS Snapshot Document for ${opt:stage}'
+          parameters:
+            sourcetablename:
+              type: String
+              default: 'template_builder_global'
+            targettablename:
+              type: String
+              default: 'template_builder_global'
+            Region:
+              type: String
+            RoleArn:
+              type: String
+              default: ${self:custom.role_arn.${self:provider.stage}}
+            customer:
+              type: String
+          mainSteps:
+            - name: DynamoDBMigration
+              action: 'aws:invokeLambdaFunction'
+              timeoutSeconds: 9200
+              inputs:
+                FunctionName: DynamoDBMigration
+                InvocationType: RequestResponse
+                Payload: |
+                  {
+                    "sourcetablename": "{{sourcetablename}}",
+                    "targettablename": "{{targettablename}}",
+                    "Region": "{{Region}}",
+                    "RoleArn": "{{RoleArn}}",
+                    "customer": "{{customer}}"
+                  }
+        DocumentType: Automation
+        Name: DynamoDBMigration
+
+custom:
+  env_resources:
+    uat: 
+    prod:
+  role_arn:
+    uat:
+    prod:
+  
+
+
